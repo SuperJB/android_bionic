@@ -460,14 +460,11 @@ endif # !arm
 libc_common_cflags := \
 		-DWITH_ERRLIST			\
 		-DANDROID_CHANGES		\
-		-DUSE_LOCKS 			\
-		-DREALLOC_ZERO_BYTES_FREES 	\
 		-D_LIBC=1 			\
 		-DSOFTFLOAT                     \
 		-DFLOATING_POINT		\
 		-DINET6 \
 		-I$(LOCAL_PATH)/private \
-		-DUSE_DL_PREFIX \
 		-DPOSIX_MISTAKE \
                 -DLOG_ON_HEAP_ERROR \
 
