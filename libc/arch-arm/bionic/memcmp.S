@@ -30,8 +30,15 @@
 #include <machine/cpu-features.h>
 #include <machine/asm.h>
 
+
+#ifdef HAVE_32_BYTE_CACHE_LINE
+#define CACHE_LINE_SIZE     32
+#else
+#define CACHE_LINE_SIZE     64
+#endif
+
 /*
- * Optimized memcmp() for ARM9 and Cortex-A9
+ * Optimized memcmp() for Cortex-A9.
  */
 
 #if __ARM_ARCH__ >= 7
@@ -72,6 +79,55 @@ ENTRY(memcmp)
         cmp        r2, #(8+4)
         bmi        10f
 #endif /* __ARM_CORTEX */
+/*
+ * Neon optimization
+ * Comparing 32 bytes at a time
+ */
+#if defined(__ARM_NEON__) && defined(NEON_UNALIGNED_ACCESS)
+        subs        r2, r2, #32
+        blo         3f
+
+        /* preload all the cache lines we need. */
+        pld         [r0, #(CACHE_LINE_SIZE * 2)]
+        pld         [r1, #(CACHE_LINE_SIZE * 2)]
+
+1:      /* The main loop compares 32 bytes at a time */
+        vld1.8      {d0 - d3}, [r0]!
+        pld         [r0, #(CACHE_LINE_SIZE * 2)]
+        vld1.8      {d4 - d7}, [r1]!
+        pld         [r1, #(CACHE_LINE_SIZE * 2)]
+
+        /* Start subtracting the values and merge results */
+        vsub.i8     q0, q2
+        vsub.i8     q1, q3
+        vorr        q2, q0, q1
+        vorr        d4, d5
+        vmov        r3, ip, d4
+        /* Check if there are any differences among the 32 bytes */
+        orrs        r3, ip
+        bne         2f
+        subs        r2, r2, #32
+        bhs         1b
+        b           3f
+2:
+        /* Check if the difference was in the first or last 16 bytes */
+        sub         r0, #32
+        vorr        d0, d1
+        sub         r1, #32
+        vmov        r3, ip, d0
+        orrs        r3, ip
+        /* if the first 16 bytes are equal, we only have to rewind 16 bytes */
+        ittt        eq
+        subeq       r2, #16
+        addeq       r0, #16
+        addeq       r1, #16
+
+3:      /* fix-up the remaining count */
+        add         r2, r2, #32
+
+        cmp        r2, #(8+4)
+        bmi        10f
+#endif
 
         .save {r4, lr}
         /* save registers */
@@ -85,7 +141,6 @@ ENTRY(memcmp)
         /* since r0 hold the result, move the first source
          * pointer somewhere else
          */
-         
          mov        r4, r0
 
 #if !defined(__ARM_CORTEX)
@@ -222,8 +277,6 @@ ENTRY(memcmp)
         bx          lr
 #endif /* __ARM_CORTEX */
 END(memcmp)
-
-
 
 
 

@@ -33,9 +33,7 @@
 #ifndef MALLOC_DEBUG_COMMON_H
 #define MALLOC_DEBUG_COMMON_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stdlib.h>
 
 #define HASHTABLE_SIZE      1543
 #define BACKTRACE_SIZE      32
@@ -49,7 +47,6 @@ extern "C" {
 // Structures
 // =============================================================================
 
-typedef struct HashEntry HashEntry;
 struct HashEntry {
     size_t slot;
     HashEntry* prev;
@@ -61,25 +58,23 @@ struct HashEntry {
     intptr_t backtrace[0];
 };
 
-typedef struct HashTable HashTable;
 struct HashTable {
     size_t count;
     HashEntry* slots[HASHTABLE_SIZE];
 };
 
 /* Entry in malloc dispatch table. */
-typedef struct MallocDebug MallocDebug;
+typedef void* (*MallocDebugMalloc)(size_t);
+typedef void (*MallocDebugFree)(void*);
+typedef void* (*MallocDebugCalloc)(size_t, size_t);
+typedef void* (*MallocDebugRealloc)(void*, size_t);
+typedef void* (*MallocDebugMemalign)(size_t, size_t);
 struct MallocDebug {
-    /* Address of the actual malloc routine. */
-    void* (*malloc)(size_t bytes);
-    /* Address of the actual free routine. */
-    void  (*free)(void* mem);
-    /* Address of the actual calloc routine. */
-    void* (*calloc)(size_t n_elements, size_t elem_size);
-    /* Address of the actual realloc routine. */
-    void* (*realloc)(void* oldMem, size_t bytes);
-    /* Address of the actual memalign routine. */
-    void* (*memalign)(size_t alignment, size_t bytes);
+  MallocDebugMalloc malloc;
+  MallocDebugFree free;
+  MallocDebugCalloc calloc;
+  MallocDebugRealloc realloc;
+  MallocDebugMemalign memalign;
 };
 
 /* Malloc debugging initialization and finalization routines.
@@ -94,8 +89,8 @@ struct MallocDebug {
  * MallocDebugInit returns:
  *    0 on success, -1 on failure.
  */
-typedef int (*MallocDebugInit)(void);
-typedef void (*MallocDebugFini)(void);
+typedef int (*MallocDebugInit)();
+typedef void (*MallocDebugFini)();
 
 // =============================================================================
 // log functions
@@ -107,9 +102,5 @@ typedef void (*MallocDebugFini)(void);
     __libc_android_log_print(ANDROID_LOG_ERROR, "malloc_leak_check", (format), ##__VA_ARGS__ )
 #define info_log(format, ...)  \
     __libc_android_log_print(ANDROID_LOG_INFO, "malloc_leak_check", (format), ##__VA_ARGS__ )
-
-#ifdef __cplusplus
-};  /* end of extern "C" */
-#endif
 
 #endif  // MALLOC_DEBUG_COMMON_H

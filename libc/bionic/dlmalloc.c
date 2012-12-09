@@ -47,7 +47,7 @@ static void __bionic_itox(char* hex, void* ptr)
     }
 }
 
-#include "logd.h"
+#include <private/logd.h>
 static void __bionic_heap_error(const char* msg, const char* function, void* p)
 {
     /* We format the buffer explicitely, i.e. without using snprintf()
