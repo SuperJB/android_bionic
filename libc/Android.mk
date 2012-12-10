@@ -390,8 +390,7 @@ libc_common_src_files += \
 	bionic/memmove.c.arm \
 	bionic/socketcalls.c \
 	string/bcopy.c \
-	string/strncmp.c \
-	unistd/socketcalls.c
+	string/strncmp.c 
 
 ifeq ($(ARCH_ARM_HAVE_ARMV7A),true)
 libc_common_src_files += arch-arm/bionic/strlen-armv7.S
@@ -409,12 +408,11 @@ else
 ifneq (, $(filter true,$(TARGET_USE_KRAIT_BIONIC_OPTIMIZATION) $(TARGET_USE_SPARROW_BIONIC_OPTIMIZATION)))
  libc_common_src_files += \
 	arch-arm/bionic/memmove.S
- else # Other ARM
+else # Other ARM
  libc_common_src_files += \
 	string/bcopy.c \
-	string/memmove.c.arm \
 	bionic/memmove_words.c
- endif # !TARGET_USE_KRAIT_BIONIC_OPTIMIZATION
+endif # !TARGET_USE_KRAIT_BIONIC_OPTIMIZATION
 endif # !TARGET_USE_SCORPION_BIONIC_OPTIMIZATION
 
 # These files need to be arm so that gdbserver
