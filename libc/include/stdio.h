@@ -41,11 +41,31 @@
 #include <sys/cdefs.h>
 #include <sys/types.h>
 
+/* va_list and size_t must be defined by stdio.h according to Posix */
+#define __need___va_list
 #include <stdarg.h>
+
+/* note that this forces stddef.h to *only* define size_t */
+#define __need_size_t
 #include <stddef.h>
 
-#define __need_NULL
-#include <stddef.h>
+#ifndef	_SIZE_T
+#define	_SIZE_T
+typedef	unsigned long    size_t;
+#endif
+
+#ifndef	_OFF_T_DEFINED_
+#define	_OFF_T_DEFINED_
+typedef	long    off_t;
+#endif
+
+#ifndef NULL
+#ifdef 	__GNUG__
+#define	NULL	__null
+#else
+#define	NULL	0L
+#endif
+#endif
 
 #define	_FSTDIO			/* Define for new stdio with functions. */
 
