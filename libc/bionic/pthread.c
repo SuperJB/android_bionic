@@ -50,6 +50,7 @@
 #include "bionic_pthread.h"
 #include "bionic_ssp.h"
 #include "bionic_tls.h"
+#include "debug_format.h"
 #include "pthread_internal.h"
 #include "thread_private.h"
 
@@ -229,7 +230,7 @@ int _init_thread(pthread_internal_t* thread, pid_t kernel_id, const pthread_attr
             // For backwards compatibility reasons, we just warn about failures here.
             // error = errno;
             const char* msg = "pthread_create sched_setscheduler call failed: %s\n";
-            __libc_android_log_print(ANDROID_LOG_WARN, "libc", msg, strerror(errno));
+            __libc_format_log(ANDROID_LOG_WARN, "libc", msg, strerror(errno));
         }
     }
 
@@ -457,22 +458,18 @@ int pthread_attr_getstacksize(pthread_attr_t const * attr, size_t * stack_size)
     return 0;
 }
 
-int pthread_attr_setstackaddr(pthread_attr_t * attr, void * stack_addr)
+int pthread_attr_setstackaddr(pthread_attr_t * attr __attribute__((unused)),
+                               void * stack_addr __attribute__((unused)))
 {
-#if 1
-    // It's not clear if this is setting the top or bottom of the stack, so don't handle it for now.
+    // This was removed from POSIX.1-2008, and is not implemented on bionic.
+    // Needed for ABI compatibility with the NDK.
     return ENOSYS;
-#else
-    if ((uint32_t)stack_addr & (PAGE_SIZE - 1)) {
-        return EINVAL;
-    }
-    attr->stack_base = stack_addr;
-    return 0;
-#endif
 }
 
 int pthread_attr_getstackaddr(pthread_attr_t const * attr, void ** stack_addr)
 {
+    // This was removed from POSIX.1-2008.
+    // Needed for ABI compatibility with the NDK.
     *stack_addr = (char*)attr->stack_base + attr->stack_size;
     return 0;
 }
@@ -520,7 +517,7 @@ int pthread_getattr_np(pthread_t thid, pthread_attr_t * attr)
     return 0;
 }
 
-int pthread_attr_setscope(pthread_attr_t *attr, int  scope)
+int pthread_attr_setscope(pthread_attr_t *attr __attribute__((unused)), int  scope)
 {
     if (scope == PTHREAD_SCOPE_SYSTEM)
         return 0;
@@ -530,7 +527,7 @@ int pthread_attr_setscope(pthread_attr_t *attr, int  scope)
     return EINVAL;
 }
 
-int pthread_attr_getscope(pthread_attr_t const *attr)
+int pthread_attr_getscope(pthread_attr_t const *attr __attribute__((unused)))
 {
     return PTHREAD_SCOPE_SYSTEM;
 }
@@ -1188,7 +1185,7 @@ _recursive_increment(pthread_mutex_t* mutex, int mvalue, int mtype)
 __LIBC_HIDDEN__
 int pthread_mutex_lock_impl(pthread_mutex_t *mutex)
 {
-    int mvalue, mtype, tid, new_lock_type, shared;
+    int mvalue, mtype, tid, shared;
 
     if (__unlikely(mutex == NULL))
         return EINVAL;
@@ -1282,7 +1279,7 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 __LIBC_HIDDEN__
 int pthread_mutex_unlock_impl(pthread_mutex_t *mutex)
 {
-    int mvalue, mtype, tid, oldv, shared;
+    int mvalue, mtype, tid, shared;
 
     if (__unlikely(mutex == NULL))
         return EINVAL;
@@ -1349,7 +1346,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex)
 __LIBC_HIDDEN__
 int pthread_mutex_trylock_impl(pthread_mutex_t *mutex)
 {
-    int mvalue, mtype, tid, oldv, shared;
+    int mvalue, mtype, tid, shared;
 
     if (__unlikely(mutex == NULL))
         return EINVAL;
@@ -1444,7 +1441,7 @@ int pthread_mutex_lock_timeout_np_impl(pthread_mutex_t *mutex, unsigned msecs)
     clockid_t        clock = CLOCK_MONOTONIC;
     struct timespec  abstime;
     struct timespec  ts;
-    int               mvalue, mtype, tid, oldv, new_lock_type, shared;
+    int               mvalue, mtype, tid, shared;
 
     /* compute absolute expiration time */
     __timespec_to_relative_msec(&abstime, msecs, clock);
@@ -2106,58 +2103,6 @@ int pthread_kill(pthread_t tid, int sig)
     return ret;
 }
 
-/* Despite the fact that our kernel headers define sigset_t explicitly
- * as a 32-bit integer, the kernel system call really expects a 64-bit
- * bitmap for the signal set, or more exactly an array of two-32-bit
- * values (see $KERNEL/arch/$ARCH/include/asm/signal.h for details).
- *
- * Unfortunately, we cannot fix the sigset_t definition without breaking
- * the C library ABI, so perform a little runtime translation here.
- */
-typedef union {
-    sigset_t   bionic;
-    uint32_t   kernel[2];
-} kernel_sigset_t;
-
-/* this is a private syscall stub */
-extern int __rt_sigprocmask(int, const kernel_sigset_t *, kernel_sigset_t *, size_t);
-
-int pthread_sigmask(int how, const sigset_t *set, sigset_t *oset)
-{
-    /* pthread_sigmask must return the error code, but the syscall
-     * will set errno instead and return 0/-1
-     */
-    int ret, old_errno = errno;
-
-    /* We must convert *set into a kernel_sigset_t */
-    kernel_sigset_t  in_set, *in_set_ptr;
-    kernel_sigset_t  out_set;
-
-    in_set.kernel[0] = in_set.kernel[1] = 0;
-    out_set.kernel[0] = out_set.kernel[1] = 0;
-
-    /* 'in_set_ptr' is the second parameter to __rt_sigprocmask. It must be NULL
-     * if 'set' is NULL to ensure correct semantics (which in this case would
-     * be to ignore 'how' and return the current signal set into 'oset'.
-     */
-    if (set == NULL) {
-        in_set_ptr = NULL;
-    } else {
-        in_set.bionic = *set;
-        in_set_ptr = &in_set;
-    }
-
-    ret = __rt_sigprocmask(how, in_set_ptr, &out_set, sizeof(kernel_sigset_t));
-    if (ret < 0)
-        ret = errno;
-
-    if (oset)
-        *oset = out_set.bionic;
-
-    errno = old_errno;
-    return ret;
-}
-
 
 int pthread_getcpuclockid(pthread_t  tid, clockid_t  *clockid)
 {
@@ -2177,9 +2122,7 @@ int pthread_getcpuclockid(pthread_t  tid, clockid_t  *clockid)
  */
 int  pthread_once( pthread_once_t*  once_control,  void (*init_routine)(void) )
 {
-    static pthread_mutex_t   once_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
     volatile pthread_once_t* ocptr = once_control;
-    pthread_once_t value;
 
     /* PTHREAD_ONCE_INIT is 0, we use the following bit flags
      *

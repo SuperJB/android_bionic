@@ -231,17 +231,18 @@ LOCAL_C_INCLUDES += $(libm_common_includes)
 LOCAL_CFLAGS := $(libm_common_cflags)
 
 LOCAL_CFLAGS:= $(libm_common_cflags)
-
 LOCAL_MODULE:= libm
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
-
+LOCAL_ARM_MODE := arm
+LOCAL_CFLAGS := $(libm_common_cflags) $(libm_$(TARGET_ARCH)_cflags)
+LOCAL_C_INCLUDES += $(libm_common_includes) $(libm_$(TARGET_ARCH)_includes)
+LOCAL_SRC_FILES := $(libm_common_src_files) $(libm_$(TARGET_ARCH)_src_files)
 LOCAL_SYSTEM_SHARED_LIBRARIES := libc
-
 include $(BUILD_STATIC_LIBRARY)
 
-# libm.so
-# ========================================================
-
+#
+# libm.so for target.
+#
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
@@ -253,10 +254,8 @@ LOCAL_C_INCLUDES += $(libm_common_includes)
 LOCAL_CFLAGS := $(libm_common_cflags)
 
 LOCAL_CFLAGS:= $(libm_common_cflags)
-
 LOCAL_MODULE:= libm
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
-
 LOCAL_SYSTEM_SHARED_LIBRARIES := libc
-
+LOCAL_WHOLE_STATIC_LIBRARIES := libm
 include $(BUILD_SHARED_LIBRARY)

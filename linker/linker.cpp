@@ -41,13 +41,13 @@
 
 // Private C library headers.
 #include <private/bionic_tls.h>
+#include <private/debug_format.h>
 #include <private/logd.h>
 #include <private/ScopedPthreadMutexLocker.h>
 
 #include "linker.h"
 #include "linker_debug.h"
 #include "linker_environ.h"
-#include "linker_format.h"
 #include "linker_phdr.h"
 
 /* Assume average path length of 64 and max 8 paths */
@@ -159,7 +159,7 @@ static char tmp_err_buf[768];
 static char __linker_dl_err_buf[768];
 #define DL_ERR(fmt, x...) \
     do { \
-        format_buffer(__linker_dl_err_buf, sizeof(__linker_dl_err_buf), fmt, ##x); \
+        __libc_format_buffer(__linker_dl_err_buf, sizeof(__linker_dl_err_buf), fmt, ##x); \
         /* If LD_DEBUG is set high enough, send every dlerror(3) message to the log. */ \
         DEBUG(fmt "\n", ##x); \
     } while(0)
@@ -349,6 +349,43 @@ static void soinfo_free(soinfo* si)
     if (si == sonext) sonext = prev;
     si->next = gSoInfoFreeList;
     gSoInfoFreeList = si;
+}
+
+
+static void parse_path(const char* path, const char* delimiters,
+                       const char** array, char* buf, size_t buf_size, size_t max_count) {
+  if (path == NULL) {
+    return;
+  }
+
+  size_t len = strlcpy(buf, path, buf_size);
+
+  size_t i = 0;
+  char* buf_p = buf;
+  while (i < max_count && (array[i] = strsep(&buf_p, delimiters))) {
+    if (*array[i] != '\0') {
+      ++i;
+    }
+  }
+
+  // Forget the last path if we had to truncate; this occurs if the 2nd to
+  // last char isn't '\0' (i.e. wasn't originally a delimiter).
+  if (i > 0 && len >= buf_size && buf[buf_size - 2] != '\0') {
+    array[i - 1] = NULL;
+  } else {
+    array[i] = NULL;
+  }
+}
+
+static void parse_LD_LIBRARY_PATH(const char* path) {
+  parse_path(path, ":", gLdPaths,
+             gLdPathsBuffer, sizeof(gLdPathsBuffer), LDPATH_MAX);
+}
+
+static void parse_LD_PRELOAD(const char* path) {
+  // We have historically supported ':' as well as ' ' in LD_PRELOAD.
+  parse_path(path, " :", gLdPreloadNames,
+             gLdPreloadsBuffer, sizeof(gLdPreloadsBuffer), LDPRELOAD_MAX);
 }
 
 #ifdef ANDROID_ARM_LINKER
@@ -561,34 +598,28 @@ Elf32_Sym *soinfo_lookup(soinfo *si, const char *name)
 
 /* This is used by dl_sym().  It performs a global symbol lookup.
  */
-Elf32_Sym *lookup(const char *name, soinfo **found, soinfo *start)
-{
-    unsigned elf_hash = elfhash(name);
-    Elf32_Sym *s = NULL;
-    soinfo *si;
+Elf32_Sym* lookup(const char* name, soinfo** found, soinfo* start) {
+  unsigned elf_hash = elfhash(name);
 
-    if(start == NULL) {
-        start = solist;
+  if (start == NULL) {
+    start = solist;
+  }
+
+  Elf32_Sym* s = NULL;
+  for (soinfo* si = start; (s == NULL) && (si != NULL); si = si->next) {
+    s = soinfo_elf_lookup(si, elf_hash, name);
+    if (s != NULL) {
+      *found = si;
+      break;
     }
+  }
 
-    for(si = start; (s == NULL) && (si != NULL); si = si->next)
-    {
-        if(si->flags & FLAG_ERROR)
-            continue;
-        s = soinfo_elf_lookup(si, elf_hash, name);
-        if (s != NULL) {
-            *found = si;
-            break;
-        }
-    }
+  if (s != NULL) {
+    TRACE_TYPE(LOOKUP, "%s s->st_value = 0x%08x, found->base = 0x%08x\n",
+               name, s->st_value, (*found)->base);
+  }
 
-    if(s != NULL) {
-        TRACE_TYPE(LOOKUP, "%s s->st_value = 0x%08x, si->base = 0x%08x\n",
-                   name, s->st_value, si->base);
-        return s;
-    }
-
-    return NULL;
+  return s;
 }
 
 soinfo *find_containing_library(const void *addr)
@@ -643,7 +674,7 @@ static void dump(soinfo *si)
 static int open_library_on_path(const char* name, const char* const paths[]) {
   char buf[512];
   for (size_t i = 0; paths[i] != NULL; ++i) {
-    int n = format_buffer(buf, sizeof(buf), "%s/%s", paths[i], name);
+    int n = __libc_format_buffer(buf, sizeof(buf), "%s/%s", paths[i], name);
     if (n < 0 || n >= static_cast<int>(sizeof(buf))) {
       PRINT("Warning: ignoring very long library path: %s/%s\n", paths[i], name);
       continue;
@@ -869,20 +900,6 @@ static soinfo* load_library(const char* name) {
     return si.release();
 }
 
-static soinfo* init_library(soinfo* si) {
-  // At this point we know that whatever is loaded @ base is a valid ELF
-  // shared library whose segments are properly mapped in.
-  TRACE("[ init_library base=0x%08x sz=0x%08x name='%s') ]\n",
-        si->base, si->size, si->name);
-
-  if (!soinfo_link_image(si)) {
-    munmap((void *)si->base, si->size);
-    return NULL;
-  }
-
-  return si;
-}
-
 static soinfo *find_loaded_library(const char *name)
 {
     soinfo *si;
@@ -909,10 +926,6 @@ static soinfo* find_library_internal(const char* name) {
 
   soinfo* si = find_loaded_library(name);
   if (si != NULL) {
-    if (si->flags & FLAG_ERROR) {
-      DL_ERR("\"%s\" failed to load previously", name);
-      return NULL;
-    }
     if (si->flags & FLAG_LINKED) {
       return si;
     }
@@ -922,8 +935,19 @@ static soinfo* find_library_internal(const char* name) {
 
   TRACE("[ '%s' has not been loaded yet.  Locating...]\n", name);
   si = load_library(name);
-  if (si != NULL) {
-    si = init_library(si);
+  if (si == NULL) {
+    return NULL;
+  }
+
+  // At this point we know that whatever is loaded @ base is a valid ELF
+  // shared library whose segments are properly mapped in.
+  TRACE("[ init_library base=0x%08x sz=0x%08x name='%s') ]\n",
+        si->base, si->size, si->name);
+
+  if (!soinfo_link_image(si)) {
+    munmap(reinterpret_cast<void*>(si->base), si->size);
+    soinfo_free(si);
+    return NULL;
   }
 
   return si;
@@ -966,7 +990,17 @@ static int soinfo_unload(soinfo* si) {
   return 0;
 }
 
-soinfo* do_dlopen(const char* name) {
+void do_android_update_LD_LIBRARY_PATH(const char* ld_library_path) {
+  if (!get_AT_SECURE()) {
+    parse_LD_LIBRARY_PATH(ld_library_path);
+  }
+}
+
+soinfo* do_dlopen(const char* name, int flags) {
+  if ((flags & ~(RTLD_NOW|RTLD_LAZY|RTLD_LOCAL|RTLD_GLOBAL)) != 0) {
+    DL_ERR("invalid flags to dlopen: %x", flags);
+    return NULL;
+  }
   set_soinfo_pool_protection(PROT_READ | PROT_WRITE);
   soinfo* si = find_library(name);
   if (si != NULL) {
@@ -1332,24 +1366,24 @@ void soinfo::CallArray(const char* array_name UNUSED, unsigned* array, int count
     TRACE("[ Looking at %s[%d] *%p == 0x%08x ]\n", array_name, n, array, *array);
     void (*func)() = (void (*)()) *array;
     array += step;
-    if (((int) func == 0) || ((int) func == -1)) {
-      continue;
-    }
-    TRACE("[ Calling func @ %p ]\n", func);
-    func();
+    CallFunction("function", func);
   }
 
   TRACE("[ Done calling %s for '%s' ]\n", array_name, name);
 }
 
 void soinfo::CallFunction(const char* function_name UNUSED, void (*function)()) {
-  if (function == NULL) {
+  if (function == NULL || reinterpret_cast<uintptr_t>(function) == static_cast<uintptr_t>(-1)) {
     return;
   }
 
   TRACE("[ Calling %s @ %p for '%s' ]\n", function_name, function, name);
   function();
   TRACE("[ Done calling %s for '%s' ]\n", function_name, name);
+
+  // The function may have called dlopen(3) or dlclose(3), so we need to ensure our data structures
+  // are still writable. This happens with our debug malloc (see http://b/7941716).
+  set_soinfo_pool_protection(PROT_READ | PROT_WRITE);
 }
 
 void soinfo::CallPreInitConstructors() {
@@ -1462,8 +1496,6 @@ static int nullify_closed_stdio() {
 }
 
 static bool soinfo_link_image(soinfo* si) {
-    si->flags |= FLAG_ERROR;
-
     /* "base" might wrap around UINT32_MAX. */
     Elf32_Addr base = si->load_bias;
     const Elf32_Phdr *phdr = si->phdr;
@@ -1479,8 +1511,9 @@ static bool soinfo_link_image(soinfo* si) {
 
     /* Extract dynamic section */
     size_t dynamic_count;
+    Elf32_Word dynamic_flags;
     phdr_table_get_dynamic_section(phdr, phnum, base, &si->dynamic,
-                                   &dynamic_count);
+                                   &dynamic_count, &dynamic_flags);
     if (si->dynamic == NULL) {
         if (!relocating_linker) {
             DL_ERR("missing PT_DYNAMIC in \"%s\"", si->name);
@@ -1536,10 +1569,11 @@ static bool soinfo_link_image(soinfo* si) {
             si->plt_got = (unsigned *)(base + *d);
             break;
         case DT_DEBUG:
-#if !defined(ANDROID_MIPS_LINKER)
             // Set the DT_DEBUG entry to the address of _r_debug for GDB
-            *d = (int) &_r_debug;
-#endif
+            // if the dynamic table is writable
+            if ((dynamic_flags & PF_W) != 0) {
+                *d = (int) &_r_debug;
+            }
             break;
          case DT_RELA:
             DL_ERR("unsupported DT_RELA in \"%s\"", si->name);
@@ -1743,45 +1777,7 @@ static bool soinfo_link_image(soinfo* si) {
         nullify_closed_stdio();
     }
     notify_gdb_of_load(si);
-    si->flags &= ~FLAG_ERROR;
     return true;
-}
-
-static void parse_path(const char* path, const char* delimiters,
-                       const char** array, char* buf, size_t buf_size, size_t max_count)
-{
-    if (path == NULL) {
-        return;
-    }
-
-    size_t len = strlcpy(buf, path, buf_size);
-
-    size_t i = 0;
-    char* buf_p = buf;
-    while (i < max_count && (array[i] = strsep(&buf_p, delimiters))) {
-        if (*array[i] != '\0') {
-            ++i;
-        }
-    }
-
-    // Forget the last path if we had to truncate; this occurs if the 2nd to
-    // last char isn't '\0' (i.e. wasn't originally a delimiter).
-    if (i > 0 && len >= buf_size && buf[buf_size - 2] != '\0') {
-        array[i - 1] = NULL;
-    } else {
-        array[i] = NULL;
-    }
-}
-
-static void parse_LD_LIBRARY_PATH(const char* path) {
-    parse_path(path, ":", gLdPaths,
-               gLdPathsBuffer, sizeof(gLdPathsBuffer), LDPATH_MAX);
-}
-
-static void parse_LD_PRELOAD(const char* path) {
-    // We have historically supported ':' as well as ' ' in LD_PRELOAD.
-    parse_path(path, " :", gLdPreloadNames,
-               gLdPreloadsBuffer, sizeof(gLdPreloadsBuffer), LDPRELOAD_MAX);
 }
 
 /*
@@ -1872,7 +1868,7 @@ static unsigned __linker_init_post_relocation(unsigned **elfdata, unsigned linke
     Elf32_Phdr *phdr =
         (Elf32_Phdr *)((unsigned char *) linker_base + elf_hdr->e_phoff);
     phdr_table_get_dynamic_section(phdr, elf_hdr->e_phnum, linker_base,
-                                   &linker_soinfo.dynamic, NULL);
+                                   &linker_soinfo.dynamic, NULL, NULL);
     insert_soinfo_into_debug_map(&linker_soinfo);
 
     /* extract information passed from the kernel */

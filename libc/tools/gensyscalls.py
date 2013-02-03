@@ -111,11 +111,10 @@ arm_call_long = arm_header + """\
 """ + arm_footer
 
 arm_eabi_call_default = arm_header + """\
-    .save   {r4, r7}
-    stmfd   sp!, {r4, r7}
+    mov     ip, r7
     ldr     r7, =%(idname)s
     swi     #0
-    ldmfd   sp!, {r4, r7}
+    mov     r7, ip
     movs    r0, r0
     bxpl    lr
     b       __set_syscall_errno
@@ -533,12 +532,6 @@ class State:
         if not os.path.exists( bionic_temp ):
             D( "creating %s" % bionic_temp )
             make_dir( bionic_temp )
-
-#        D( "p4 editing source files" )
-#        for arch in all_archs:
-#            commands.getoutput( "p4 edit " + arch + "/syscalls/*.S " )
-#            commands.getoutput( "p4 edit " + arch + "/syscalls.mk" )
-#        commands.getoutput( "p4 edit " + bionic_root + "include/sys/linux-syscalls.h" )
 
         D( "re-generating stubs and support files" )
 

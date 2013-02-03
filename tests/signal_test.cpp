@@ -48,13 +48,13 @@ static void TestSigSet2(Fn fn) {
   int min_signal = SIGHUP;
   int max_signal = SIGRTMAX;
 
-#if __BIONIC__
-  // bionic's sigset_t is too small: 32 bits instead of 64.
+#if defined(__BIONIC__) && !defined(__mips__)
+  // bionic's sigset_t is too small for ARM and x86: 32 bits instead of 64.
   // This means you can't refer to any of the real-time signals.
   // See http://b/3038348 and http://b/5828899.
-  max_signal = 31;
+  max_signal = 32;
 #else
-  // Other C libraries are perfectly capable of using their largest signal.
+  // Other C libraries (or bionic for MIPS) are perfectly capable of using their largest signal.
   ASSERT_GE(sizeof(sigset_t) * 8, static_cast<size_t>(SIGRTMAX));
 #endif
 
@@ -94,4 +94,34 @@ TEST(signal, sigemptyset_invalid) {
 
 TEST(signal, sigfillset_invalid) {
   TestSigSet1(sigfillset);
+}
+
+TEST(signal, raise_invalid) {
+  errno = 0;
+  ASSERT_EQ(-1, raise(-1));
+  ASSERT_EQ(EINVAL, errno);
+}
+
+static void HandleSIGALRM(int signal_number) {
+  ASSERT_EQ(SIGALRM, signal_number);
+}
+
+TEST(signal, sigwait) {
+  struct sigaction action;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = 0;
+  action.sa_handler = HandleSIGALRM;
+  sigaction(SIGALRM, &action, NULL);
+
+  sigset_t wait_set;
+  sigemptyset(&wait_set);
+  sigaddset(&wait_set, SIGALRM);
+
+  alarm(1);
+
+  int received_signal;
+  errno = 0;
+  ASSERT_EQ(0, sigwait(&wait_set, &received_signal));
+  ASSERT_EQ(0, errno);
+  ASSERT_EQ(SIGALRM, received_signal);
 }

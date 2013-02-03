@@ -47,16 +47,20 @@ include $(BUILD_EXECUTABLE)
 # -----------------------------------------------------------------------------
 
 test_c_flags = \
-    -fstack-protector \
+    -fstack-protector-all \
     -g \
     -Wall -Wextra \
     -Werror \
+    -fno-builtin \
 
 test_src_files = \
+    debug_format_test.cpp \
     dirent_test.cpp \
     fenv_test.cpp \
+    getauxval_test.cpp \
     getcwd_test.cpp \
     libgen_test.cpp \
+    math_test.cpp \
     pthread_test.cpp \
     regex_test.cpp \
     signal_test.cpp \
@@ -65,10 +69,11 @@ test_src_files = \
     stdlib_test.cpp \
     string_test.cpp \
     stubs_test.cpp \
+    unistd_test.cpp \
 
 test_dynamic_ldflags = -Wl,--export-dynamic -Wl,-u,DlSymTestFunction
 test_dynamic_src_files = \
-    dlopen_test.cpp \
+    dlfcn_test.cpp \
 
 # Build tests for the device (with bionic's .so). Run with:
 #   adb shell /data/nativetest/bionic-unit-tests/bionic-unit-tests
@@ -97,13 +102,15 @@ include $(BUILD_NATIVE_TEST)
 # -----------------------------------------------------------------------------
 
 # Build no-elf-hash-table-library.so to test dlopen(3) on a library that
-# only has a GNU-style hash table.
+# only has a GNU-style hash table. MIPS doesn't support GNU hash style.
+ifneq ($(TARGET_ARCH),mips)
 include $(CLEAR_VARS)
 LOCAL_MODULE := no-elf-hash-table-library
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_SRC_FILES := empty.cpp
 LOCAL_LDFLAGS := -Wl,--hash-style=gnu
 include $(BUILD_SHARED_LIBRARY)
+endif
 
 # -----------------------------------------------------------------------------
 # Unit tests built against glibc.

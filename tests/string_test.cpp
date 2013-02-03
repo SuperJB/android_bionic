@@ -39,7 +39,7 @@ TEST(string, strerror) {
   ASSERT_STREQ("Operation not permitted", strerror(1));
 
   // Invalid.
-  ASSERT_STREQ("Unknown error 4294967295", strerror(-1));
+  ASSERT_STREQ("Unknown error -1", strerror(-1));
   ASSERT_STREQ("Unknown error 1234", strerror(1234));
 }
 
@@ -77,7 +77,7 @@ TEST(string, strerror_r) {
 
   // Invalid.
   ASSERT_EQ(0, strerror_r(-1, buf, sizeof(buf)));
-  ASSERT_STREQ("Unknown error 4294967295", buf);
+  ASSERT_STREQ("Unknown error -1", buf);
   ASSERT_EQ(0, strerror_r(1234, buf, sizeof(buf)));
   ASSERT_STREQ("Unknown error 1234", buf);
 
@@ -304,6 +304,40 @@ TEST(string, strcpy) {
                  (memcmp(state.ptr2, state.ptr + state.MAX_LEN, state.MAX_LEN) != 0));
   }
 }
+
+
+#if __BIONIC__
+// We have to say "DeathTest" here so gtest knows to run this test (which exits)
+// in its own process.
+TEST(string_DeathTest, strcpy_fortified) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  char buf[10];
+  char *orig = strdup("0123456789");
+  ASSERT_EXIT(strcpy(buf, orig), testing::KilledBySignal(SIGSEGV), "");
+  free(orig);
+}
+
+TEST(string_DeathTest, strlen_fortified) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  char buf[10];
+  memcpy(buf, "0123456789", sizeof(buf));
+  ASSERT_EXIT(printf("%d", strlen(buf)), testing::KilledBySignal(SIGSEGV), "");
+}
+
+TEST(string_DeathTest, strchr_fortified) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  char buf[10];
+  memcpy(buf, "0123456789", sizeof(buf));
+  ASSERT_EXIT(printf("%s", strchr(buf, 'a')), testing::KilledBySignal(SIGSEGV), "");
+}
+
+TEST(string_DeathTest, strrchr_fortified) {
+  ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+  char buf[10];
+  memcpy(buf, "0123456789", sizeof(buf));
+  ASSERT_EXIT(printf("%s", strrchr(buf, 'a')), testing::KilledBySignal(SIGSEGV), "");
+}
+#endif
 
 #if __BIONIC__
 TEST(string, strlcat) {

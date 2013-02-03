@@ -165,8 +165,7 @@ void  sincosf(float x, float *psin, float *pcos)
     }
 }
 
-void  sincosl(long double x, long double *psin, long double *pcos)
-{
-    *psin = sin(x);
-    *pcos = cos(x);
+void sincosl(long double x, long double* p_sinl, long double* p_cosl) {
+  *p_sinl = sinl(x);
+  *p_cosl = cosl(x);
 }
